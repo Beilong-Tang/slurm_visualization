@@ -1,0 +1,5 @@
+778409bashcommonnormalncsuRUNNING7:211-00:00:0023:52:391816GN/ANonecompute-052026-10-29T14:05:142026-10-29T14:05:1411657/hpc/home/btang1
+778390cpu-btang1commonnormalncsuRUNNING1:12:528:00:006:47:08124GN/ANonecompute-052026-10-29T12:59:432026-10-29T12:59:4311657/hpc/home/btang1
+777852train-dit-b2-spheregpunormalncsuPENDING0:002-00:00:002-00:00:00124128Ggres/gpu:h200:1Priority2026-10-28T21:10:252026-10-31T12:29:3712511/work/btang1/work/DiT-sphere
+777853train-dit-b2-gaussnormgpunormalncsuPENDING0:002-00:00:002-00:00:00124128Ggres/gpu:h200:1Priority2026-10-28T21:10:252026-10-31T12:29:3712511/work/btang1/work/DiT-sphere
+777847train-dit-b2gpunormalncsuRUNNING1:38:572-00:00:001-22:21:03124128Ggres/gpu:h200:1Nonecompute-gpu-012026-10-28T20:54:252026-10-29T12:33:3812663/work/btang1/work/DiT
