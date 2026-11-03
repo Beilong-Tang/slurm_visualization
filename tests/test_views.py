@@ -17,6 +17,8 @@ FIX = Path(__file__).parent / "fixtures"
 def fake_runner(args):
     if args[0] == "squeue":
         return (FIX / "squeue.txt").read_text()
+    if args[0] == "sacct" and "--format=JobID,AllocTRES,TRESUsageInMax" in args:
+        return (FIX / "sacct_gpu.txt").read_text()
     if args[0] == "sacct" and "-j" in args:
         return (FIX / "sacct_steps.txt").read_text() if "-X" not in args else ""
     if args[0] == "sacct":
@@ -31,7 +33,8 @@ def fake_runner(args):
 
 
 def make_app(page_size=20):
-    return views.App(client=SlurmClient(user="btang1", runner=fake_runner), page_size=page_size)
+    client = SlurmClient(user="btang1", runner=fake_runner, gpu_mode="sacct")
+    return views.App(client=client, page_size=page_size)
 
 
 class TestPaginate(unittest.TestCase):
@@ -106,6 +109,21 @@ class TestPages(unittest.TestCase):
         page = views.overview(make_app(), {"q": "<script>alert(1)</script>"})
         self.assertNotIn("<script>alert", page.html)
         self.assertIn(esc("<script>alert(1)</script>"), page.html)
+
+    def test_gpu_columns_and_detail(self):
+        app = make_app()
+        html = views.completed(app, {"q": "777824"}).html
+        self.assertIn("GPU util", html)
+        self.assertIn('class="pct" title="GPU utilization per GPU', html)  # 100%: not flagged
+        self.assertIn('<span class="pct low"', html)  # memory efficiency 9% < 30%: flagged
+        html = views.completed(app, {"sort": "gpuutil", "order": "desc"}).html
+        self.assertEqual(views.completed(app, {"sort": "gpumem"}).status, 200)
+        detail = views.job_detail(app, {}, "777824").html
+        self.assertIn("GPU utilization", detail)
+        self.assertIn("GPU memory efficiency", detail)
+        self.assertIn("one sample per job step", detail)
+        running = views.job_detail(app, {}, "777847").html
+        self.assertIn("shown when the job finishes", running)
 
     def test_running_only_running(self):
         app = make_app()
@@ -210,6 +228,13 @@ class TestServer(unittest.TestCase):
                 self.assertIn('href="/job/777824/log/stdout"', html)
         self.assertEqual(self.get("/job/777824/log/stdout")[0], 403)
         self.assertEqual(self.get("/job/777824/log/passwd", cookie="c=secret")[0], 404)
+
+    def test_timezone_cookie(self):
+        status, _, html = self.get("/job/777824", cookie="c=secret; slurmviz_tz=America%2FNew_York")
+        self.assertEqual(status, 200)
+        self.assertIn('data-tz="America/New_York"', html)
+        _, _, html = self.get("/", cookie="c=secret; slurmviz_tz=Bogus%2FZone")
+        self.assertIn('data-tz=""', html)  # unknown zone: fall back to server time, no error
 
     def test_favicon(self):
         self.assertEqual(self.get("/favicon.ico")[0], 200)

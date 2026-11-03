@@ -153,6 +153,12 @@ class Job:
     stderr: str = ""
     job_id_raw: str = ""
     source: str = ""  # "squeue" or "sacct"
+    # GPU usage of finished GPU jobs (see gpu.py); None when unknown
+    gpu_util: float | None = None
+    gpu_mem_eff: float | None = None
+    gpu_mem_used_mib: float | None = None
+    gpu_mem_total_mib: float | None = None
+    gpu_stats_source: str = ""
 
     @property
     def category(self) -> str:
@@ -345,9 +351,14 @@ class SlurmClient:
     days: int = 30
     ttl: float = 15.0
     runner: Callable[[list[str]], str] = run_command
+    gpu_mode: str = "auto"  # auto | slurm-gpu | sacct | off
+    gpu_ttl: float = 120.0  # GPU stats only change when jobs finish
 
     def __post_init__(self):
+        from .gpu import GpuStatsSource  # gpu.py imports this module
         self.cache = TTLCache(self.ttl)
+        self.gpu = GpuStatsSource(self.user, self.days, self.runner, self.gpu_mode)
+        self.gpu_warnings: list[str] = []
 
     # command lines are methods so --check can print exactly what runs
     def squeue_args(self) -> list[str]:
@@ -365,10 +376,36 @@ class SlurmClient:
     def history(self) -> CacheResult:
         return self.cache.get("sacct", lambda: parse_sacct(self.runner(self.sacct_args())))
 
+    def gpu_stats(self) -> dict:
+        """GpuStats by job id. GPU numbers are a nice-to-have, so failures only produce warnings."""
+        def fetch():
+            stats, warnings = self.gpu.fetch()
+            self.gpu_warnings = warnings
+            return stats
+        try:
+            result = self.cache.get("gpu", fetch, ttl=self.gpu_ttl)
+        except Exception as exc:
+            self.gpu_warnings = [f"GPU stats unavailable: {exc}"]
+            return {}
+        if result.error:
+            self.gpu_warnings = [f"GPU stats are stale: {result.error}"]
+        return result.value
+
+    def attach_gpu_stats(self, jobs: list[Job]) -> list[Job]:
+        stats = self.gpu_stats()
+        out = []
+        for j in jobs:
+            st = stats.get(j.job_id) if j.gpus and j.category == "finished" else None
+            if st:
+                j = replace(j, gpu_util=st.util, gpu_mem_eff=st.mem_eff, gpu_mem_used_mib=st.mem_used_mib,
+                            gpu_mem_total_mib=st.mem_total_mib, gpu_stats_source=st.source)
+            out.append(j)
+        return out
+
     def all_jobs(self) -> CacheResult:
         """Merged list plus the oldest fetch time and any error from either source."""
         act, hist = self.active(), self.history()
-        jobs = merge_jobs(hist.value, act.value)
+        jobs = self.attach_gpu_stats(merge_jobs(hist.value, act.value))
         error = "; ".join(e for e in (act.error, hist.error) if e) or None
         return CacheResult(jobs, min(act.fetched_at, hist.fetched_at), error)
 

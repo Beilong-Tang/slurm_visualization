@@ -38,6 +38,7 @@ header { display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
 .tabs a.active { background: var(--text); color: var(--panel); }
 .count { font-size: 12px; opacity: .7; margin-left: 2px; }
 .status { margin-left: auto; display: flex; gap: 14px; color: var(--muted); font-size: 13px; align-items: center; }
+.tz { cursor: help; border-bottom: 1px dotted var(--muted); }
 .auto { display: flex; gap: 4px; align-items: center; cursor: pointer; }
 
 /* thin loading bar at the top of the page */
@@ -97,6 +98,8 @@ tbody tr:last-child td { border-bottom: 0; }
 h1 .badge { font-size: 13px; }
 .gpu { color: var(--gpu); background: var(--gpu-bg); padding: 1px 7px; border-radius: 4px; font-size: 12px; font-weight: 600; }
 .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.pct { font-variant-numeric: tabular-nums; cursor: help; }
+.pct.low { color: var(--fail); font-weight: 600; }
 .reason { border-bottom: 1px dotted var(--muted); cursor: help; }
 
 .progress { width: 140px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }

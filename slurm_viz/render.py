@@ -1,9 +1,11 @@
 """HTML building blocks. Every dynamic value goes through esc()."""
 
-from datetime import datetime, timedelta
+from contextvars import ContextVar
+from datetime import datetime, timedelta, tzinfo
 from html import escape
 from typing import Callable
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .slurm import Job
 
@@ -33,13 +35,41 @@ def esc(value) -> str:
 
 # ---------------------------------------------------------------- formatting
 
+# The viewer's time zone for the current request (set by server.py from the
+# browser's slurmviz_tz cookie). None means the server's own zone.
+DISPLAY_TZ: ContextVar[tzinfo | None] = ContextVar("DISPLAY_TZ", default=None)
+
+
+def parse_tz(name: str | None) -> ZoneInfo | None:
+    """'America/New_York' -> ZoneInfo, or None if missing/unknown."""
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def to_display(dt: datetime) -> datetime:
+    """Slurm prints naive times in the server's zone; convert them to the viewer's zone."""
+    aware = dt.astimezone() if dt.tzinfo is None else dt
+    return aware.astimezone(DISPLAY_TZ.get())
+
+
+def tz_label() -> str:
+    """Short name of the zone times are shown in, e.g. 'EST'."""
+    return to_display(datetime.now()).strftime("%Z")
+
+
 def fmt_dt(dt: datetime | None, now: datetime | None = None) -> str:
-    """'10-29 14:05' with the full timestamp and a relative time as tooltip."""
+    """'10-29 14:05' in the viewer's zone; tooltip has the full time, server time and relative time."""
     if dt is None:
         return '<span class="muted">–</span>'
     now = now or datetime.now()
-    short = dt.strftime("%m-%d %H:%M") if dt.year == now.year else dt.strftime("%Y-%m-%d")
-    return f'<time datetime="{dt.isoformat()}" title="{dt:%Y-%m-%d %H:%M:%S} ({esc(fmt_rel(dt, now))})">{short}</time>'
+    local, server = to_display(dt), dt.astimezone() if dt.tzinfo is None else dt
+    short = local.strftime("%m-%d %H:%M") if local.year == to_display(now).year else local.strftime("%Y-%m-%d")
+    title = f"{local:%Y-%m-%d %H:%M:%S %Z} · server {server:%m-%d %H:%M %Z} · {fmt_rel(dt, now)}"
+    return f'<time datetime="{server.isoformat()}" title="{esc(title)}">{short}</time>'
 
 
 def fmt_rel(dt: datetime, now: datetime | None = None) -> str:
@@ -96,6 +126,40 @@ def gpu_cell(job: Job) -> str:
     if not job.gpus:
         return '<span class="muted">–</span>'
     return f'<span class="gpu" title="{esc(job.gpu_type)}">{job.gpus}× {esc(job.gpu_type or "GPU")}</span>'
+
+
+# NCShare's gpu-hp efficiency targets (https://userguide.ncshare.org/guides/gpu/)
+GPU_UTIL_TARGET = 70
+GPU_MEM_TARGET = 30
+GPU_SOURCE_NOTE = {
+    "sacct": "from sacct: one sample per job step, not a time average",
+    "slurm-gpu": "from slurm-gpu report",
+}
+
+
+def fmt_mib(mib: float | None) -> str:
+    if mib is None:
+        return "?"
+    return f"{mib / 1024:.1f} GiB" if mib >= 1024 else f"{mib:.0f} MiB"
+
+
+def _pct_cell(value: float | None, target: float, title: str) -> str:
+    if value is None:
+        return '<span class="muted">–</span>'
+    cls = "pct low" if value < target else "pct"
+    return f'<span class="{cls}" title="{esc(title)}">{value:.0f}%</span>'
+
+
+def gpu_util_cell(job: Job) -> str:
+    note = GPU_SOURCE_NOTE.get(job.gpu_stats_source, "")
+    return _pct_cell(job.gpu_util, GPU_UTIL_TARGET, f"GPU utilization per GPU; target ≥{GPU_UTIL_TARGET}% ({note})")
+
+
+def gpu_mem_cell(job: Job) -> str:
+    note = GPU_SOURCE_NOTE.get(job.gpu_stats_source, "")
+    used = (f"{fmt_mib(job.gpu_mem_used_mib)} of {fmt_mib(job.gpu_mem_total_mib)} used; "
+            if job.gpu_mem_used_mib is not None else "")
+    return _pct_cell(job.gpu_mem_eff, GPU_MEM_TARGET, f"{used}target ≥{GPU_MEM_TARGET}% ({note})")
 
 
 def reason_cell(job: Job) -> str:
@@ -213,15 +277,18 @@ def layout(title: str, active: str, body: str, counts: dict, user: str,
         nav.append(f'<a href="{href}"{cls}>{esc(label)}{count}</a>')
     banner = '<div id="banner" data-swap>'
     if error:
-        when = datetime.fromtimestamp(fetched_at).strftime("%H:%M:%S") if fetched_at else "?"
+        when = to_display(datetime.fromtimestamp(fetched_at)).strftime("%H:%M:%S") if fetched_at else "?"
         banner += f'<div class="banner">Slurm did not answer; showing data from {when}. <small>{esc(error)}</small></div>'
     banner += "</div>"
     updated = (f'<span id="updated" data-swap data-ts="{fetched_at:.0f}">updated '
-               f'{datetime.fromtimestamp(fetched_at):%H:%M:%S}</span>') if fetched_at else ""
+               f'{to_display(datetime.fromtimestamp(fetched_at)):%H:%M:%S}</span>') if fetched_at else ""
+    zone_name = getattr(DISPLAY_TZ.get(), "key", "")
+    tz_note = (f'<span class="tz" title="Times are shown in {esc(zone_name or "the server")} time. '
+               f'Hover a time to also see the server (Slurm) time.">times in {esc(tz_label())}</span>')
     toggle = (f'<label class="auto"><input type="checkbox" id="autorefresh" data-seconds="{refresh}"> '
               f'auto-refresh {refresh}s</label>') if refresh else ""
     return f'''<!doctype html>
-<html lang="en"><head>
+<html lang="en" data-tz="{esc(zone_name)}"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)} · Slurm Jobs</title>
 <link rel="stylesheet" href="/static/style.css">
@@ -231,7 +298,7 @@ def layout(title: str, active: str, body: str, counts: dict, user: str,
 <div id="loadbar" aria-hidden="true"></div>
 <header><div class="brand">Slurm Jobs <span class="muted">· {esc(user)}</span></div>
 <nav class="tabs" id="tabs" data-swap>{"".join(nav)}</nav>
-<div class="status">{updated}<button type="button" id="refresh-btn" class="js-only"
+<div class="status">{tz_note}{updated}<button type="button" id="refresh-btn" class="js-only"
   title="Fetch the latest data from Slurm now">↻ Refresh</button>{toggle}</div></header>
 {banner}
 <main>{body}</main>

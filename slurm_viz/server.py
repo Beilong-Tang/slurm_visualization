@@ -15,7 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 
 from . import views
-from .render import error_page
+from .render import DISPLAY_TZ, error_page, parse_tz
 from .slurm import SlurmError
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -74,6 +74,8 @@ class Handler(BaseHTTPRequestHandler):
         for pattern, view in ROUTES:
             m = pattern.match(url.path)
             if m:
+                # show times in the browser's zone (app.js stores it in this cookie)
+                tz_token = DISPLAY_TZ.set(parse_tz(unquote(self.cookie("slurmviz_tz") or "")))
                 try:
                     page = view(self.app, params, *(unquote(g) for g in m.groups()))
                 except SlurmError as exc:
@@ -81,13 +83,21 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     traceback.print_exc()
                     page = views.Page(500, error_page(500, "Internal error; see the server terminal."))
+                finally:
+                    DISPLAY_TZ.reset(tz_token)
                 return self.send(page.status, page.html.encode(), page.content_type)
         self.send_html(404, error_page(404, "Page not found"))
 
+    def cookie(self, name: str) -> str | None:
+        try:
+            morsel = SimpleCookie(self.headers.get("Cookie", "")).get(name)
+        except Exception:  # malformed Cookie header
+            return None
+        return morsel.value if morsel is not None else None
+
     def authorized(self) -> bool:
-        cookie = SimpleCookie(self.headers.get("Cookie", ""))
-        morsel = cookie.get(self.cookie_name)
-        return morsel is not None and hmac.compare_digest(morsel.value, self.token)
+        value = self.cookie(self.cookie_name)
+        return value is not None and hmac.compare_digest(value, self.token)
 
     def send_static(self, name: str):
         path = (STATIC_DIR / name).resolve()

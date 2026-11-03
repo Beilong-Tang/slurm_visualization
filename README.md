@@ -10,7 +10,7 @@ It only uses the Python 3.10+ standard library, so there is nothing to install.
 | **Running** `/running` | Node, elapsed vs. time limit bar, time left |
 | **Queue** `/pending` | Pending reason (hover for an explanation), how long it has waited, Slurm's estimated start |
 | **Completed** `/completed` | Final state, exit code, end time, elapsed |
-| **Job** `/job/<id>` | All fields, job steps with max memory, and the last 300 lines of stdout/stderr |
+| **Job** `/job/<id>` | All fields, GPU util / memory efficiency, job steps, and live stdout/stderr (last 300 lines; "View full log" opens the whole file) |
 
 Every list can be filtered (name or ID search, state, partition, submit date) and sorted by clicking a column header.
 
@@ -80,7 +80,27 @@ or `Ctrl+C` to stop it.
 | `--page-size` | 20 | Jobs per page |
 | `--ttl` | 15 | Seconds to reuse Slurm output between requests |
 | `--user` | `$USER` | Whose jobs to show |
+| `--gpu-stats` | auto | Where GPU util / memory efficiency come from: `auto`, `slurm-gpu`, `sacct` or `off` (see below) |
 | `--host` | 127.0.0.1 | Leave this alone (see Security) |
+
+## GPU utilization and memory efficiency
+
+Finished GPU jobs get **GPU util** and **GPU mem** columns (Overview and Completed,
+sortable) and the same numbers on the job page. Values under NCShare's `gpu-hp`
+targets (70% utilization, 30% memory) are shown in red. Running jobs show them once they finish.
+
+`--gpu-stats auto` (the default) picks the source:
+
+- **`slurm-gpu`** when the `slurm-gpu` command exists (the login nodes). It runs
+  `slurm-gpu report -r <gpu|gpu-hp> -u $USER -S <30 days ago> -E <tomorrow>` and reads the
+  `GPUUtil` and `GPUMemEff` columns. Jobs it does not list, or a partition where it
+  fails, fall back to sacct.
+- **`sacct`** everywhere else: `gres/gpuutil` and `gres/gpumem` from the job steps,
+  divided by the number of GPUs (memory as a share of 141 GB per H200). Slurm stores
+  **one sample** per step, not a time-weighted average, so treat these numbers as a rough guide.
+
+`./run.sh --check` prints which source was picked and a few sample values.
+The stats are cached for 2 minutes (the ↻ Refresh button fetches them again).
 
 ## Security
 

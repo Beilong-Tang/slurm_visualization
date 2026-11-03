@@ -29,6 +29,8 @@ SORT_KEYS: dict[str, Callable[[Job], object]] = {
     "left": lambda j: j.time_left,
     "reason": lambda j: j.reason,
     "exit": lambda j: j.exit_code,
+    "gpuutil": lambda j: j.gpu_util,
+    "gpumem": lambda j: j.gpu_mem_eff,
 }
 
 
@@ -82,9 +84,10 @@ def apply_filters(jobs: list[Job], params: dict) -> list[Job]:
             continue
         if partition and j.partition != partition:
             continue
-        if d_from and (not j.submit or j.submit.date() < d_from):
+        # compare calendar days in the viewer's time zone, not the server's
+        if d_from and (not j.submit or r.to_display(j.submit).date() < d_from):
             continue
-        if d_to and (not j.submit or j.submit.date() > d_to):
+        if d_to and (not j.submit or r.to_display(j.submit).date() > d_to):
             continue
         out.append(j)
     return out
@@ -157,6 +160,8 @@ COL_GPUS = ("gpus", "GPUs", r.gpu_cell)
 COL_SUBMIT = ("submit", "Submitted", lambda j: r.fmt_dt(j.submit))
 COL_START = ("start", "Started", lambda j: r.fmt_dt(j.start) if j.category != "pending" or not j.start
              else f'<span class="muted" title="Slurm\'s estimated start">~{r.fmt_dt(j.start)} (est.)</span>')
+COL_GPU_UTIL = ("gpuutil", "GPU util", r.gpu_util_cell)
+COL_GPU_MEM = ("gpumem", "GPU mem", r.gpu_mem_cell)
 COL_ELAPSED = ("elapsed", "Elapsed", lambda j: esc(r.fmt_td(j.elapsed)) if j.category != "pending" else '<span class="muted">–</span>')
 
 
@@ -185,8 +190,8 @@ def overview(app: App, params: dict) -> Page:
                    f'<span>GPU-hours, last {app.client.days} days</span></div>')
     intro = (f'<p class="muted">Every job from the last {app.client.days} days plus everything '
              f'running or queued now.</p><div class="cards" id="cards" data-swap>{html_cards}</div><h2>All jobs</h2>')
-    columns = [COL_ID, COL_NAME, COL_STATE, COL_PART, COL_GPUS, COL_SUBMIT, COL_START, COL_ELAPSED,
-               ("", "Node / reason", node_or_reason)]
+    columns = [COL_ID, COL_NAME, COL_STATE, COL_PART, COL_GPUS, COL_GPU_UTIL, COL_GPU_MEM, COL_SUBMIT,
+               COL_START, COL_ELAPSED, ("", "Node / reason", node_or_reason)]
     return list_page(app, params, "/", "Overview", "Overview", lambda j: True, columns, "submit", intro)
 
 
@@ -209,11 +214,33 @@ def pending(app: App, params: dict) -> Page:
 
 
 def completed(app: App, params: dict) -> Page:
-    columns = [COL_ID, COL_NAME, COL_STATE, ("exit", "Exit", exit_cell), COL_PART, COL_GPUS, COL_SUBMIT,
+    columns = [COL_ID, COL_NAME, COL_STATE, ("exit", "Exit", exit_cell), COL_PART, COL_GPUS,
+               COL_GPU_UTIL, COL_GPU_MEM, COL_SUBMIT,
                ("end", "Ended", lambda j: r.fmt_dt(j.end)), COL_ELAPSED,
                ("", "Node", lambda j: esc(j.nodelist) or '<span class="muted">–</span>')]
     return list_page(app, params, "/completed", "Completed", "Finished jobs",
                      lambda j: j.category == "finished", columns, "end", refresh=False)
+
+
+def gpu_rows(client: SlurmClient, job: Job) -> list[str]:
+    """GPU utilization / memory efficiency rows for the job page."""
+    if not job.gpus:
+        return []
+    def row(label, value_html):
+        return f"<dt>{esc(label)}</dt><dd>{value_html}</dd>"
+    if job.category != "finished":
+        return [row("GPU usage", '<span class="muted">shown when the job finishes</span>')]
+    if not job.gpu_stats_source:
+        why = "GPU stats are turned off" if client.gpu.resolved_mode == "off" else "no GPU usage recorded"
+        return [row("GPU usage", f'<span class="muted">{why}</span>')]
+    mem = r.gpu_mem_cell(job)
+    if job.gpu_mem_used_mib is not None:
+        mem += f' <small>{esc(r.fmt_mib(job.gpu_mem_used_mib))} of {esc(r.fmt_mib(job.gpu_mem_total_mib))} used ·</small>'
+    return [
+        row("GPU utilization", r.gpu_util_cell(job) + f' <small>target ≥{r.GPU_UTIL_TARGET}%</small>'),
+        row("GPU memory efficiency", mem + f' <small>target ≥{r.GPU_MEM_TARGET}%</small>'),
+        row("GPU stats source", f'<small>{esc(r.GPU_SOURCE_NOTE.get(job.gpu_stats_source, job.gpu_stats_source))}</small>'),
+    ]
 
 
 def job_detail(app: App, params: dict, job_id: str) -> Page:
@@ -247,7 +274,9 @@ def job_detail(app: App, params: dict, job_id: str) -> Page:
         row("Elapsed / limit", r.progress(job)) if job.category == "running"
         else row("Elapsed", esc(r.fmt_td(job.elapsed))) + row("Time limit", esc(r.fmt_td(job.time_limit))),
         row("Time left", esc(r.fmt_td(job.time_left))) if job.time_left else "",
-        row("GPUs", r.gpu_cell(job)), row("CPUs", str(job.cpus)), row("Memory", esc(job.mem or "–")),
+        row("GPUs", r.gpu_cell(job)),
+        *gpu_rows(client, job),
+        row("CPUs", str(job.cpus)), row("Memory", esc(job.mem or "–")),
         row("Nodes", f"{job.nodes} · {esc(job.nodelist or '–')}"),
         row("Priority", str(job.priority)) if job.priority else "",
         row("Work dir", f'<span class="mono">{esc(job.workdir or "–")}</span>'),

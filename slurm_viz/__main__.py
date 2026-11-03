@@ -6,6 +6,7 @@ import sys
 import time
 from collections import Counter
 
+from .gpu import MODES
 from .slurm import SlurmClient, SlurmError, read_log_tail
 
 
@@ -64,6 +65,21 @@ def check(client: SlurmClient) -> int:
         if paths:
             print(f"        stdout: {paths[0] or '(none)'}")
 
+    mode = client.gpu.resolved_mode
+    print(f"\n  GPU stats source: {mode}" + (" (auto-detected)" if client.gpu.mode == "auto" else ""))
+    if mode != "off":
+        stats = step(f"GPU stats via {mode}", lambda: client.gpu.fetch())
+        if stats is not None:
+            by_job, warnings = stats
+            for w in warnings:
+                ok = False
+                print(f"  FAIL  {w}")
+            print(f"        {len(by_job)} finished GPU jobs with stats")
+            for job_id, st in list(by_job.items())[-3:]:
+                util = "–" if st.util is None else f"{st.util:.0f}%"
+                mem = "–" if st.mem_eff is None else f"{st.mem_eff:.0f}%"
+                print(f"        {job_id:>10}  util {util:>5}  mem eff {mem:>5}  ({st.source})")
+
     print("\nAll checks passed." if ok else "\nSome checks FAILED.")
     return 0 if ok else 1
 
@@ -78,9 +94,12 @@ def main(argv=None) -> int:
     p.add_argument("--refresh", type=int, default=30, help="auto-refresh seconds (0 = off)")
     p.add_argument("--page-size", type=int, default=20)
     p.add_argument("--ttl", type=float, default=15.0, help="seconds to cache Slurm output")
+    p.add_argument("--gpu-stats", choices=MODES, default="auto",
+                   help="where GPU util / memory efficiency come from: auto (slurm-gpu if installed, "
+                        "else sacct), slurm-gpu, sacct, or off")
     args = p.parse_args(argv)
 
-    client = SlurmClient(user=args.user, days=args.days, ttl=args.ttl)
+    client = SlurmClient(user=args.user, days=args.days, ttl=args.ttl, gpu_mode=args.gpu_stats)
     if args.check:
         return check(client)
     try:

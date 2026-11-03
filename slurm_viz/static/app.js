@@ -3,6 +3,21 @@
 (function () {
   document.documentElement.classList.add("js");
 
+  // ------------------------------------------------------------ time zone
+  // Tell the server our time zone so it renders times in it. If this page was
+  // rendered for a different zone (first visit, or you travelled), store it and reload once.
+  (function () {
+    var tz = "";
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { return; }
+    if (!tz || document.documentElement.dataset.tz === tz) return;
+    document.cookie = "slurmviz_tz=" + encodeURIComponent(tz) + "; path=/; max-age=31536000; SameSite=Strict";
+    var key = "slurmviz.tzreload";
+    var tried = null;
+    try { tried = sessionStorage.getItem(key); sessionStorage.setItem(key, tz); } catch (e) { /* no storage */ }
+    // reload at most once per zone, so an unknown zone on the server can't cause a reload loop
+    if (tried !== tz && document.cookie.indexOf("slurmviz_tz=") !== -1) location.reload();
+  })();
+
   function load(key, fallback) {
     try { var v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; }
   }

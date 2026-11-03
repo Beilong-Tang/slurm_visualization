@@ -25,7 +25,7 @@ class TTLCache:
         self._checked: dict[str, float] = {}
         self._lock = threading.Lock()
 
-    def get(self, key: str, fetch: Callable[[], Any]) -> CacheResult:
+    def get(self, key: str, fetch: Callable[[], Any], ttl: float | None = None) -> CacheResult:
         """Return a cached value, calling fetch() when it is older than the TTL.
 
         If fetch() raises and an older value exists, that value is returned with
@@ -34,7 +34,7 @@ class TTLCache:
         with self._lock:
             now = self.clock()
             entry = self._entries.get(key)
-            if entry is not None and now - self._checked.get(key, 0) < self.ttl:
+            if entry is not None and now - self._checked.get(key, 0) < (self.ttl if ttl is None else ttl):
                 return entry
             try:
                 value = fetch()

@@ -166,7 +166,7 @@ class TestClientAndCache(unittest.TestCase):
         jobs = c.all_jobs().value
         self.assertTrue(jobs)
         c.all_jobs()
-        self.assertEqual(seen, ["squeue", "sacct"])  # second call served from cache
+        self.assertEqual(seen, ["squeue", "sacct", "sacct"])  # jobs + GPU stats; second call served from cache
         args = c.sacct_args()
         self.assertIn("-X", args)
         self.assertIn("now-30days", args)
