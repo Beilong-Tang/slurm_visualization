@@ -280,6 +280,7 @@ def job_detail(app: App, params: dict, job_id: str) -> Page:
         row("Nodes", f"{job.nodes} · {esc(job.nodelist or '–')}"),
         row("Priority", str(job.priority)) if job.priority else "",
         row("Work dir", f'<span class="mono">{esc(job.workdir or "–")}</span>'),
+        row("Command", f'<span class="mono">{esc(job.command)}</span>') if job.command else "",
     ]
     body = [f'<p class="crumb"><a href="/">Overview</a> › job <span class="mono">{esc(job.job_id)}</span></p>',
             f'<h1>{esc(job.name)} {r.badge(job)}</h1>',

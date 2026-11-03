@@ -62,6 +62,8 @@ class TestRealOutput(unittest.TestCase):
             self.assertIn(j.category, ("running", "pending"))
             self.assertIsNotNone(j.submit)
             self.assertNotIn("(", j.reason)  # %r, not %R
+            self.assertTrue(j.command)
+        self.assertEqual(jobs[0].command, "bash")
         pending = [j for j in jobs if j.category == "pending"]
         for j in pending:
             self.assertIsNone(j.time_left)

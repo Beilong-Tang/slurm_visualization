@@ -194,6 +194,9 @@ class TestServer(unittest.TestCase):
 
     def test_live_log_endpoint(self):
         import json
+        _, _, html = self.get("/job/777852", cookie="c=secret")
+        self.assertIn("<dt>Command</dt>", html)
+        self.assertIn("/work/btang1/work/DiT-sphere/run.sh", html)
         status, headers, body = self.get("/job/777852/log", cookie="c=secret")
         self.assertEqual(status, 200)
         self.assertIn("application/json", headers["Content-Type"])

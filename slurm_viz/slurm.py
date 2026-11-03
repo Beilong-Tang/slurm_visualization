@@ -19,6 +19,7 @@ SQUEUE_FIELDS = [
     ("time_left", "%L"), ("nodes", "%D"), ("cpus", "%C"), ("mem", "%m"),
     ("gres", "%b"), ("reason", "%r"), ("nodelist", "%N"), ("submit", "%V"),
     ("start", "%S"), ("priority", "%Q"), ("workdir", "%Z"),
+    ("command", "%o"),  # keep last: parse_squeue lets it absorb any stray separators
 ]
 
 SACCT_FIELDS = [
@@ -149,6 +150,7 @@ class Job:
     reason: str = ""
     priority: int = 0
     workdir: str = ""
+    command: str = ""  # batch script or command line (squeue %o); only known while the job is active
     stdout: str = ""  # may still contain %j-style patterns (from sacct)
     stderr: str = ""
     job_id_raw: str = ""
@@ -199,7 +201,7 @@ def parse_squeue(text: str) -> list[Job]:
     for line in text.splitlines():
         if not line.strip():
             continue
-        values = line.split(SEP)
+        values = line.split(SEP, len(SQUEUE_FIELDS) - 1)
         if len(values) != len(SQUEUE_FIELDS):
             raise SlurmError(f"squeue: expected {len(SQUEUE_FIELDS)} fields, got {len(values)}: {line!r}")
         r = dict(zip((k for k, _ in SQUEUE_FIELDS), values))
@@ -214,7 +216,7 @@ def parse_squeue(text: str) -> list[Job]:
             nodes=parse_int(r["nodes"]), cpus=parse_int(r["cpus"]), mem=clean(r["mem"]),
             gpus=gpus, gpu_type=gtype, nodelist=clean(r["nodelist"]),
             reason=clean(r["reason"]), priority=parse_int(r["priority"]),
-            workdir=clean(r["workdir"]), source="squeue",
+            workdir=clean(r["workdir"]), command=clean(r["command"]), source="squeue",
         ))
     return jobs
 
