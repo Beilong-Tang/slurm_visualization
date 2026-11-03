@@ -188,6 +188,29 @@ class TestServer(unittest.TestCase):
         self.assertEqual(status, 404)
         self.assertIn("not found", body)  # URL-decoded into a valid array id, not rejected as invalid
 
+    def test_full_log(self):
+        import tempfile, os
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "job.out")
+            with open(out, "w") as f:
+                f.write("".join(f"line {i}\n" for i in range(5000)) + "\x1b[34mcolored\x1b[0m\n")
+            with mock.patch.object(SlurmClient, "log_paths", return_value=(out, "")):
+                status, headers, body = self.get("/job/777824/log/stdout", cookie="c=secret")
+                self.assertEqual(status, 200)
+                self.assertTrue(headers["Content-Type"].startswith("text/plain"))
+                self.assertTrue(body.startswith("line 0\n"))  # whole file, not just 300 lines
+                self.assertIn("line 4999\ncolored", body)
+                status, _, body = self.get("/job/777824/log/stderr", cookie="c=secret")
+                self.assertEqual(status, 404)
+                with mock.patch("slurm_viz.views.FULL_LOG_MAX", 100):
+                    _, _, body = self.get("/job/777824/log/stdout", cookie="c=secret")
+                    self.assertTrue(body.startswith("[" + out))  # truncation note
+                _, _, html = self.get("/job/777824", cookie="c=secret")
+                self.assertIn('href="/job/777824/log/stdout"', html)
+        self.assertEqual(self.get("/job/777824/log/stdout")[0], 403)
+        self.assertEqual(self.get("/job/777824/log/passwd", cookie="c=secret")[0], 404)
+
     def test_favicon(self):
         self.assertEqual(self.get("/favicon.ico")[0], 200)
 

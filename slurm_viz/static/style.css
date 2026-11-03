@@ -124,6 +124,7 @@ h1 .badge { font-size: 13px; }
   border: 1px solid var(--line); background: var(--panel); color: var(--text); }
 .log-refresh:hover { background: var(--hover); }
 .log-note:empty { display: none; }
+.log-full { margin-left: auto; font-size: 13px; }
 .log { margin-bottom: 16px; }
 .log-head { padding: 6px 0; display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
 .logtext { background: #111; color: #ddd; font: 12px/1.45 var(--mono); padding: 12px; border-radius: 8px;

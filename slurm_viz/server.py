@@ -27,6 +27,7 @@ ROUTES = [
     (re.compile(r"^/completed/?$"), views.completed),
     (re.compile(r"^/job/([^/]+)/?$"), views.job_detail),
     (re.compile(r"^/job/([^/]+)/log$"), views.job_log),
+    (re.compile(r"^/job/([^/]+)/log/(stdout|stderr)$"), views.job_log_full),
 ]
 
 SECURITY_HEADERS = {

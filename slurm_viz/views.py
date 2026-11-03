@@ -1,16 +1,19 @@
 """Page handlers: filter -> sort -> paginate -> render."""
 
 import json
+import os
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Callable
+from urllib.parse import quote
 
 from . import render as r
 from .render import esc
 from .slurm import Job, SlurmClient, SlurmError, read_log_tail
 
 LOG_LINES = 300
+FULL_LOG_MAX = 50 * 1024 * 1024  # "View full log" shows at most the last 50 MB
 LOG_POLL = 5  # seconds between live log updates on the job page
 
 SORT_KEYS: dict[str, Callable[[Job], object]] = {
@@ -281,7 +284,9 @@ def job_detail(app: App, params: dict, job_id: str) -> Page:
         body.append(
             f'<div class="log" data-kind="{log["kind"]}"><div class="log-head"><strong>{log["kind"]}</strong> '
             f'<span class="mono">{esc(log["path"] or "(not set)")}</span> '
-            f'<span class="muted log-msg">{esc(log["msg"])}</span></div>'
+            f'<span class="muted log-msg">{esc(log["msg"])}</span>'
+            f'<a class="log-full" href="/job/{esc(quote(job.job_id))}/log/{log["kind"]}" target="_blank" '
+            f'rel="noopener" title="Open the whole file as plain text in a new tab">View full log ↗</a></div>'
             f'<div class="muted log-note">{esc(log["note"])}</div>'
             f'<pre class="logtext"{hidden}>{esc(log["text"] or "")}</pre></div>')
 
@@ -319,3 +324,21 @@ def job_log(app: App, params: dict, job_id: str) -> Page:
         return Page(404, json.dumps({"error": "job not found"}), "application/json")
     data = {"state": job.state, "logs": log_data(app.client, job)}
     return Page(200, json.dumps(data), "application/json")
+
+
+def job_log_full(app: App, params: dict, job_id: str, kind: str) -> Page:
+    """The whole stdout/stderr file as plain text (last FULL_LOG_MAX bytes for huge files)."""
+    text_type = "text/plain; charset=utf-8"
+    try:
+        job = app.client.job(job_id)
+    except ValueError:
+        job = None
+    if job is None:
+        return Page(404, f"Job {job_id} not found\n", text_type)
+    path = dict(zip(("stdout", "stderr"), app.client.log_paths(job)))[kind]
+    text, msg = read_log_tail(path, max_bytes=FULL_LOG_MAX)
+    if text is None:
+        return Page(404, f"No {kind} log for job {job_id}: {msg}\n{path}\n", text_type)
+    if os.path.getsize(path) > FULL_LOG_MAX:
+        text = f"[{path}: {msg}; showing the last {FULL_LOG_MAX // 2**20} MB]\n\n" + text
+    return Page(200, text, text_type)
